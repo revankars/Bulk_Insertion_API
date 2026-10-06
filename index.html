@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Validate and upload CSV files to Adobe Analytics Bulk Data Insertion API.">
+  <title>Analytics Bulk Data Insertion</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <p class="eyebrow">Adobe Analytics</p>
+      <h1>Bulk Data Insertion</h1>
+      <p class="subtitle">Validate, protect, and submit CSV files in a guided workflow.</p>
+    </div>
+    <div class="mode-badge" id="modeBadge">Backend proxy mode</div>
+  </header>
+
+  <main class="layout">
+    <section class="main-column" aria-label="Upload workflow">
+      <article class="card">
+        <div class="card-heading">
+          <div>
+            <span class="step-number">1</span>
+            <h2>Authentication</h2>
+          </div>
+          <span class="security-pill">Credentials stay in memory</span>
+        </div>
+
+        <div class="segmented" role="tablist" aria-label="Authentication method">
+          <button id="tabGenerate" class="segment active" type="button" role="tab"
+                  aria-selected="true">Generate access token</button>
+          <button id="tabExisting" class="segment" type="button" role="tab"
+                  aria-selected="false">Use existing token</button>
+        </div>
+
+        <div class="notice info" id="authNotice">
+          Server-to-Server credentials are used only to request a short-lived access token. The
+          client secret is never stored, never logged, and is never sent to the ingestion
+          endpoints. Ingestion uses only the access token and client ID.
+        </div>
+
+        <div class="form-grid">
+          <label class="field">
+            <span>Adobe Client ID</span>
+            <input id="clientId" type="text" autocomplete="off" placeholder="Adobe API client ID">
+            <small>Sent as <code>x-api-key</code> on every ingestion request.</small>
+          </label>
+
+          <label class="field">
+            <span>Backend Proxy URL</span>
+            <input id="proxyBaseUrl" type="url" value="http://localhost:3000"
+                   placeholder="http://localhost:3000">
+            <small>
+              All Adobe calls are routed through this proxy. Adobe IMS and the collection API
+              do not permit direct browser requests.
+            </small>
+          </label>
+        </div>
+
+        <div class="form-grid auth-panel" id="generatePanel">
+          <label class="field">
+            <span>Client Secret</span>
+            <div class="password-row">
+              <input id="clientSecret" type="password" autocomplete="off"
+                     placeholder="OAuth Server-to-Server client secret">
+              <label class="show-token">
+                <input id="showSecret" type="checkbox">
+                Show
+              </label>
+            </div>
+            <small>Used once to request a token. Never stored or reused.</small>
+          </label>
+
+          <label class="field">
+            <span>Organization ID</span>
+            <input id="orgId" type="text" autocomplete="off" placeholder="XXXXXXXX@AdobeOrg">
+            <small>Reference only. Not part of the IMS token request.</small>
+          </label>
+
+          <label class="field">
+            <span>Scopes</span>
+            <input id="scopes" type="text" autocomplete="off"
+                   value="openid, AdobeID, additional_info.projectedProductContext">
+          </label>
+
+          <label class="field">
+            <span>Token Endpoint</span>
+            <input id="tokenEndpoint" type="url" autocomplete="off"
+                   value="https://ims-na1.adobelogin.com/ims/token/v3">
+          </label>
+
+          <div class="field full token-actions">
+            <button id="generateTokenButton" class="button primary" type="button">
+              Generate Access Token
+            </button>
+            <button id="clearCredentialsButton" class="button ghost" type="button">
+              Clear Credentials
+            </button>
+            <span id="tokenStatus" class="token-status neutral" aria-live="polite">
+              No access token yet.
+            </span>
+          </div>
+        </div>
+
+        <div class="form-grid auth-panel hidden" id="existingPanel">
+          <label class="field full">
+            <span>OAuth Access Token</span>
+            <div class="password-row">
+              <input id="accessToken" type="password" autocomplete="off"
+                     placeholder="Paste a short-lived OAuth access token">
+              <label class="show-token">
+                <input id="showToken" type="checkbox">
+                Show
+              </label>
+            </div>
+          </label>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-heading">
+          <div>
+            <span class="step-number">2</span>
+            <h2>Configuration</h2>
+          </div>
+          <button id="verifySuiteButton" class="button small secondary" type="button" disabled>
+            Verify CSV
+          </button>
+        </div>
+
+        <div class="form-grid">
+          <label class="field">
+            <span>Report Suite ID</span>
+            <input id="reportSuiteId" type="text" value="cdwglobaldev" spellcheck="false">
+            <small>
+              Adobe reads the destination report suite from the CSV's <code>reportSuiteID</code>
+              column. It is never sent as a request header.
+            </small>
+          </label>
+
+          <label class="field">
+            <span>Visitor Group ID</span>
+            <input id="visitorGroupId" type="text" value="bulk-insertion-api" spellcheck="false">
+            <small>
+              Required by Adobe as the <code>x-adobe-vgid</code> header on upload. Keep the same
+              value for all files whose visitors should be grouped together.
+            </small>
+          </label>
+        </div>
+
+        <div id="suiteVerification" class="verify-panel hidden" aria-live="polite">
+          <div class="verify-headline">
+            <span id="verifyBadge" class="status neutral">Not verified</span>
+            <span id="verifyMessage">Select a CSV file to verify the destination report suite.</span>
+          </div>
+          <div class="verify-grid">
+            <div>
+              <span>reportSuiteID column</span>
+              <strong id="verifyColumn">—</strong>
+            </div>
+            <div>
+              <span>Report suites in CSV</span>
+              <strong id="verifyDetected">—</strong>
+            </div>
+            <div>
+              <span>Rows targeting this suite</span>
+              <strong id="verifyMatch">—</strong>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-heading">
+          <div>
+            <span class="step-number">3</span>
+            <h2>Select CSV</h2>
+          </div>
+        </div>
+
+        <input id="fileInput" type="file" accept=".csv,text/csv" class="visually-hidden">
+        <button id="dropZone" class="drop-zone" type="button">
+          <span class="upload-icon" aria-hidden="true">↑</span>
+          <strong>Drag &amp; drop CSV file here</strong>
+          <span>or</span>
+          <span class="button secondary">Choose CSV File</span>
+          <small>Supported format: CSV</small>
+        </button>
+
+        <div id="fileSummary" class="file-summary hidden" aria-live="polite">
+          <div><span>File</span><strong id="fileName">—</strong></div>
+          <div><span>Size</span><strong id="fileSize">—</strong></div>
+          <div><span>Rows</span><strong id="rowCount">—</strong></div>
+          <div><span>Report Suite</span><strong id="fileReportSuite">—</strong></div>
+          <div><span>Compressed</span><strong id="compressedSize">—</strong></div>
+        </div>
+
+        <div id="fileError" class="notice error hidden" role="alert"></div>
+      </article>
+
+      <article class="card">
+        <div class="card-heading">
+          <div>
+            <span class="step-number">4</span>
+            <h2>Submit</h2>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button id="validateButton" class="button primary" type="button" disabled>Validate File</button>
+          <button id="uploadButton" class="button success" type="button" disabled>Upload to Adobe</button>
+          <button id="statusButton" class="button secondary" type="button" disabled>Check Status</button>
+          <button id="resetButton" class="button ghost" type="button">Reset</button>
+        </div>
+
+        <div class="progress-bar hidden" id="activityBar" aria-label="Operation in progress">
+          <span></span>
+        </div>
+        <p id="operationMessage" class="operation-message" aria-live="polite">Select a CSV file to begin.</p>
+
+        <div id="uploadReceipt" class="verify-panel hidden" aria-live="polite">
+          <div class="verify-headline">
+            <span id="receiptBadge" class="status neutral">Not uploaded</span>
+            <span id="receiptMessage">Upload receipt details will appear here.</span>
+          </div>
+          <div class="verify-grid">
+            <div><span>File ID</span><strong id="receiptFileId">—</strong></div>
+            <div><span>Status code</span><strong id="receiptStatusCode">—</strong></div>
+            <div><span>Status</span><strong id="receiptStatus">—</strong></div>
+            <div><span>Upload name</span><strong id="receiptUploadName">—</strong></div>
+            <div><span>Visitor group</span><strong id="receiptVisitorGroup">—</strong></div>
+            <div><span>Rows accepted</span><strong id="receiptRows">—</strong></div>
+            <div><span>Invalid rows</span><strong id="receiptInvalidRows">—</strong></div>
+            <div><span>Size received</span><strong id="receiptSize">—</strong></div>
+            <div><span>Received date</span><strong id="receiptReceived">—</strong></div>
+            <div><span>Idempotency key</span><strong id="receiptIdempotencyKey">—</strong></div>
+          </div>
+          <pre id="receiptLog" class="receipt-log hidden"></pre>
+        </div>
+      </article>
+
+      <article class="card response-card">
+        <div class="card-heading">
+          <div>
+            <span class="step-number">5</span>
+            <h2>Adobe Response</h2>
+          </div>
+          <button id="copyResponseButton" class="button small ghost" type="button" disabled>Copy Response</button>
+        </div>
+
+        <div class="response-meta">
+          <span id="responseKind">No request made</span>
+          <span id="responseStatus" class="status neutral">—</span>
+          <time id="responseTime"></time>
+        </div>
+        <pre id="responseViewer" tabindex="0">Adobe API responses will appear here.</pre>
+      </article>
+    </section>
+
+    <aside class="side-column">
+      <article class="card sticky">
+        <div class="card-heading">
+          <h2>Processing</h2>
+        </div>
+        <ol class="tracker" id="progressTracker">
+          <li data-step="selected"><span>1</span><div><strong>File selected</strong><small>Waiting</small></div></li>
+          <li data-step="inspected"><span>2</span><div><strong>CSV inspected</strong><small>Waiting</small></div></li>
+          <li data-step="suite"><span>3</span><div><strong>Report suite verified</strong><small>Waiting</small></div></li>
+          <li data-step="compressed"><span>4</span><div><strong>File compressed</strong><small>Waiting</small></div></li>
+          <li data-step="validated"><span>5</span><div><strong>File validated</strong><small>Waiting</small></div></li>
+          <li data-step="uploaded"><span>6</span><div><strong>Uploaded</strong><small>Waiting</small></div></li>
+          <li data-step="status"><span>7</span><div><strong>Status checked</strong><small>Waiting</small></div></li>
+        </ol>
+      </article>
+
+      <article class="card">
+        <div class="card-heading">
+          <h2>Idempotency</h2>
+          <button id="copyKeyButton" class="button small ghost" type="button" disabled>Copy</button>
+        </div>
+        <p class="muted">SHA-256 of the exact original file contents.</p>
+        <code id="idempotencyKey" class="key-display">Generated after file selection</code>
+      </article>
+
+      <article class="card compact">
+        <h2>Security</h2>
+        <ul class="security-list">
+          <li>Secret is used once for the token request only.</li>
+          <li>Secret is cleared after a token is issued.</li>
+          <li>Credentials are never persisted or logged.</li>
+          <li>Ingestion sends only the token and client ID.</li>
+          <li>Report suite ID is read from the CSV.</li>
+        </ul>
+      </article>
+    </aside>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
